@@ -1,18 +1,14 @@
 {
   "name": "florentines-mint",
   "version": "1.0.0",
-  "main": "index.js",
+  "main": "mint.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "start": "node mint.js",
+    "build": "npm install"
   },
-  "keywords": [],
-  "author": "",
-  "license": "ISC",
-  "type": "commonjs",
-  "description": "",
   "dependencies": {
-    "dotenv": "^17.4.2",
-    "ethers": "^6.16.0",
-    "node-cron": "^4.2.1"
+    "dotenv": "^16.0.0",
+    "ethers": "^6.0.0",
+    "node-cron": "^3.0.0"
   }
 }
