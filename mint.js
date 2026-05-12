@@ -6,7 +6,7 @@ const provider = new ethers.JsonRpcProvider(process.env.RPC_URL);
 const wallet = new ethers.Wallet(process.env.PRIVATE_KEY, provider);
 
 const SEADROP = "0x00005EA00Ac477B1030CE78506496e8C2dE24bf5";
-const NFT_CONTRACT = "0x36689a52f40D8CB15A5eec5fd1e44d392bF10e55";
+const NFT_CONTRACT = "0x31bbc8Af58717059A356fdeF3d4B04160906FEB1";
 const FEE_RECIPIENT = "0x0000a26b00c1F0DF003000390027140000fAa719";
 const MINT_PRICE_ETH = 0.0025;
 
