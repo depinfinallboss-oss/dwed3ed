@@ -56,7 +56,7 @@ async function blastMint() {
   }
 
   try {
-    const nonce = await provider.getTransactionCount(wallet.address, "latest");
+    const nonce = await provider.getTransactionCount(wallet.address, "pending");
     const remaining = MAX_MINT - minted;
     console.log(`🚀 Need ${remaining} more NFT(s). Nonce: ${nonce}`);
 
