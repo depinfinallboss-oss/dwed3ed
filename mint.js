@@ -16,6 +16,18 @@ const ABI = [
 
 const contract = new ethers.Contract(SEADROP, ABI, wallet);
 
+(async () => {
+  console.log("Wallet:", wallet.address);
+
+  const balance = await provider.getBalance(wallet.address);
+
+  console.log(
+    "Balance:",
+    ethers.formatEther(balance),
+    "ETH"
+  );
+})();
+
 let minted = 0;
 let START_TIME = null;
 const MAX_MINT = 2;
