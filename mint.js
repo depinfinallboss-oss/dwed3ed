@@ -16,29 +16,25 @@ const ABI = [
 
 const contract = new ethers.Contract(SEADROP, ABI, wallet);
 
+// Check wallet on startup
 (async () => {
-  console.log("Wallet:", wallet.address);
-
+  console.log("👛 Wallet:", wallet.address);
   const balance = await provider.getBalance(wallet.address);
-
-  console.log(
-    "Balance:",
-    ethers.formatEther(balance),
-    "ETH"
-  );
+  console.log("💰 Balance:", ethers.formatEther(balance), "ETH");
 })();
 
 let minted = 0;
 let START_TIME = null;
+let isBlasting = false;
 const MAX_MINT = 2;
-const TIME_LIMIT_MS = 10 * 60 * 1000; // 10 minutes
+const TIME_LIMIT_MS = 10 * 60 * 1000;
 
 async function sendTx(quantity, nonce) {
   const feeData = await provider.getFeeData();
   const tx = await contract.mintPublic(
     NFT_CONTRACT,
     FEE_RECIPIENT,
-    ethers.ZeroAddress,
+    wallet.address,
     quantity,
     {
       value: ethers.parseEther((MINT_PRICE_ETH * quantity).toFixed(6)),
@@ -52,7 +48,6 @@ async function sendTx(quantity, nonce) {
 }
 
 async function blastMint() {
-  // Stop if time limit reached
   if (START_TIME && Date.now() - START_TIME > TIME_LIMIT_MS) {
     console.log("⏰ 10 min limit reached — stopping!");
     console.log(`📊 Final: ${minted}/${MAX_MINT} minted`);
@@ -60,7 +55,6 @@ async function blastMint() {
     return;
   }
 
-  // Stop if already minted max
   if (minted >= MAX_MINT) {
     console.log(`🏆 Done! Got all ${minted}/${MAX_MINT} NFTs!`);
     process.exit(0);
@@ -68,59 +62,94 @@ async function blastMint() {
   }
 
   try {
-    const nonce = await provider.getTransactionCount(wallet.address, "pending");
+    // Use latest after blast failures to avoid stuck pending nonce
+    const nonceType = isBlasting ? "latest" : "pending";
+    const nonce = await provider.getTransactionCount(wallet.address, nonceType);
     const remaining = MAX_MINT - minted;
-    console.log(`🚀 Need ${remaining} more NFT(s). Nonce: ${nonce}`);
+    console.log(`🚀 Need ${remaining} more. Nonce: ${nonce} (${nonceType})`);
 
     if (remaining === 2) {
-      // Try to mint 1st NFT
-      console.log("🥇 Sending TX1 (1st NFT)...");
-      const tx1 = await sendTx(1, nonce);
-      console.log("✅ TX1 sent:", tx1.hash);
+      isBlasting = true;
+      console.log("💥 Blasting TX1 + TX2 simultaneously!");
 
-      const receipt1 = await tx1.wait();
-      if (receipt1) {
-        minted += 1;
-        console.log(`🎉 1st NFT MINTED! (${minted}/${MAX_MINT})`);
-        console.log("🔗 https://etherscan.io/tx/" + tx1.hash);
+      // Use allSettled for sendTx too — prevents TX2 getting stuck
+      const sendResults = await Promise.allSettled([
+        sendTx(1, nonce),
+        sendTx(1, nonce + 1),
+      ]);
+
+      const tx1Result = sendResults[0];
+      const tx2Result = sendResults[1];
+
+      // Only wait for txs that actually broadcast
+      const waitPromises = [];
+      if (tx1Result.status === "fulfilled") {
+        console.log("✅ TX1 sent:", tx1Result.value.hash);
+        waitPromises.push({ id: 1, promise: tx1Result.value.wait(), hash: tx1Result.value.hash });
+      } else {
+        console.log("❌ TX1 failed to broadcast:", tx1Result.reason?.message);
       }
 
-      // Always retry — will handle 2nd NFT on next call
-      console.log("🔄 Going for 2nd NFT in 2s...");
-      setTimeout(blastMint, 2000);
-
-    } else if (remaining === 1) {
-      // Only 2nd NFT left
-      console.log("🥈 Sending TX2 (2nd NFT)...");
-      const tx2 = await sendTx(1, nonce);
-      console.log("✅ TX2 sent:", tx2.hash);
-
-      const receipt2 = await tx2.wait();
-      if (receipt2) {
-        minted += 1;
-        console.log(`🎉 2nd NFT MINTED! (${minted}/${MAX_MINT})`);
-        console.log("🔗 https://etherscan.io/tx/" + tx2.hash);
+      if (tx2Result.status === "fulfilled") {
+        console.log("✅ TX2 sent:", tx2Result.value.hash);
+        waitPromises.push({ id: 2, promise: tx2Result.value.wait(), hash: tx2Result.value.hash });
+      } else {
+        console.log("❌ TX2 failed to broadcast:", tx2Result.reason?.message);
       }
+
+      // Wait for confirmations
+      const receipts = await Promise.allSettled(waitPromises.map(w => w.promise));
+
+      receipts.forEach((r, i) => {
+        if (r.status === "fulfilled" && r.value.status === 1) {
+          minted += 1;
+          console.log(`🎉 TX${waitPromises[i].id} MINTED! (${minted}/${MAX_MINT})`);
+          console.log("🔗 https://etherscan.io/tx/" + waitPromises[i].hash);
+        } else {
+          console.log(`❌ TX${waitPromises[i].id} failed or reverted`);
+        }
+      });
+
+      isBlasting = false;
 
       if (minted >= MAX_MINT) {
         console.log("🏆 DONE! Got both NFTs!");
         process.exit(0);
       } else {
-        // 2nd mint failed, retry
-        console.log("🔄 Retrying 2nd NFT in 2s...");
+        console.log(`🔄 Got ${minted}/${MAX_MINT} — retrying in 2s...`);
+        setTimeout(blastMint, 2000);
+      }
+
+    } else if (remaining === 1) {
+      isBlasting = false;
+      console.log("🥈 Sending final TX...");
+      const tx = await sendTx(1, nonce);
+      console.log("✅ TX sent:", tx.hash);
+      const receipt = await tx.wait();
+      if (receipt && receipt.status === 1) {
+        minted += 1;
+        console.log(`🎉 MINTED! (${minted}/${MAX_MINT})`);
+        console.log("🔗 https://etherscan.io/tx/" + tx.hash);
+      } else {
+        console.log("❌ TX failed or reverted");
+      }
+      if (minted >= MAX_MINT) {
+        console.log("🏆 DONE! Got both NFTs!");
+        process.exit(0);
+      } else {
+        console.log("🔄 Retrying in 2s...");
         setTimeout(blastMint, 2000);
       }
     }
 
   } catch (err) {
+    isBlasting = false;
     console.error("❌ Failed:", err.message);
     console.log("🔄 Retrying in 2s...");
     setTimeout(blastMint, 2000);
   }
 }
 
-// May 13 10:00 PM GMT+5 = 17:00 UTC
-// Fire 20 seconds early
 cron.schedule("40 59 16 13 5 *", () => {
   console.log("⏰ TIME TO MINT!");
   START_TIME = Date.now();
@@ -131,9 +160,10 @@ console.log("✅ Bot armed — The Florentines");
 console.log("🕐 Fires: May 13 at 16:59:40 UTC (9:59:40PM GMT+5)");
 console.log("💰 Minting 2 NFTs at 0.0025 ETH each");
 console.log("⛓️  Ethereum Mainnet via SeaDrop");
-console.log("🥇 Mints 1st first, then 2nd if successful");
+console.log("💥 Blasts both txs simultaneously!");
 console.log("⛽ Gas: 5x current network price");
 console.log("🔁 Keeps retrying for 10 minutes max");
 console.log("⏳ Waiting...");
 
 process.stdin.resume();
+
